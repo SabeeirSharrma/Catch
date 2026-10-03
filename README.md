@@ -49,8 +49,7 @@ Requires **JDK 17+ (21 recommended)** and an Android SDK with `platforms;android
 ./gradlew :app:assembleRelease     # minified release APK (signed only if a keystore is configured)
 ```
 
-Release signing is optional and environment-driven, so the build never depends on a checked-in
-keystore:
+Release signing is environment-driven, so no keystore is ever committed to git:
 
 ```bash
 export CATCH_KEYSTORE_FILE=/path/to/release.jks
@@ -71,10 +70,21 @@ Two workflows live in `.github/workflows/`:
   git push origin v0.1.0
   ```
 
-  It builds `assembleRelease` and publishes a GitHub Release with `Catch-v0.1.0.apk` and
-  `SHA256SUMS.txt`. Optional repository secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`,
-  `KEY_ALIAS`, `KEY_PASSWORD` sign the APK; without them the release ships an **unsigned** APK
-  (sideload it after `apksigner sign`).
+  It builds `assembleRelease`, verifies the signature with `apksigner` (an unsigned
+  APK can never be published), and creates a GitHub Release with `Catch-vX.Y.Z.apk`
+  and `SHA256SUMS.txt`.
+
+  Signing requires these repository secrets — without them the job fails on purpose:
+
+  | Secret | Value |
+  |---|---|
+  | `KEYSTORE_BASE64` | `base64 -w0 keystore/catch-release.jks` |
+  | `KEYSTORE_PASSWORD` | contents of `keystore/catch-release.password.txt` |
+  | `KEY_ALIAS` | `catch` |
+  | `KEY_PASSWORD` | same as `KEYSTORE_PASSWORD` |
+
+  Back up `keystore/` somewhere outside the repo: without it, no future update can
+  be signed, and Android will refuse to install an update signed with a different key.
 
 ## Verification status
 
