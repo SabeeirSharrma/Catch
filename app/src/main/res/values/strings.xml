@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Catch</string>
+    <!-- Notification -->
+    <string name="notification_channel_name">Catch session</string>
+    <string name="notification_channel_desc">Status and controls for the running Roblox session</string>
+    <string name="notification_title">Catch is running</string>
+    <string name="action_show">Show mirror</string>
+    <string name="action_hide">Hide</string>
+    <string name="action_stop_loop">Stop loop</string>
+    <string name="action_stop_all">Stop all</string>
+    <!-- Setup -->
+    <string name="setup_title">Setup</string>
+    <string name="setup_shizuku">Shizuku permission</string>
+    <string name="setup_shizuku_hint">Catch needs Shizuku. It works without root: start Shizuku with wireless debugging.</string>
+    <string name="setup_overlay">Display over other apps</string>
+    <string name="setup_overlay_hint">Required for the floating bubble and mirror.</string>
+    <string name="setup_notifications">Notifications</string>
+    <string name="setup_notifications_hint">The persistent notification is your safety net if the bubble is lost.</string>
+    <string name="setup_projection">Screen capture consent</string>
+    <string name="setup_projection_hint">Used to create the virtual display. Nothing is recorded or uploaded.</string>
+    <string name="setup_grant">Grant</string>
+    <string name="setup_granted">Granted</string>
+    <string name="setup_missing">Missing</string>
+    <!-- Session -->
+    <string name="btn_start">Start session</string>
+    <string name="btn_stop">Stop</string>
+    <string name="label_loop">Auto-clicker</string>
+    <string name="label_anti_idle">Anti-idle</string>
+    <string name="label_cps">Clicks per second (max 30)</string>
+    <string name="label_anti_idle_minutes">Anti-idle interval (minutes)</string>
+    <string name="label_calibration">Calibration point</string>
+    <string name="label_calibrate_hint">Open the mirror, tap the in-game button you want Catch to press.</string>
+    <string name="btn_calibrate">Set point from mirror</string>
+    <string name="label_diagnostic">Diagnostics</string>
+    <string name="btn_self_test">Run Shizuku self test</string>
+    <string name="btn_keep_alive">Apply keep-alive tuning</string>
+    <!-- OxygenOS checklist -->
+    <string name="checklist_title">OxygenOS / manufacturer checklist</string>
+    <string name="checklist_hint">Do these manually once, then lock both apps in recents.</string>
+    <string name="check_roblox_bg">Roblox: allow background activity + auto-launch</string>
+    <string name="check_catch_bg">Catch: allow background activity + auto-launch</string>
+    <string name="check_battery">Both apps: battery usage set to Unrestricted</string>
+    <string name="check_recents">Both apps locked in the recents screen</string>
+</resources>

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="catch_primary">#1B5E20</color>
+    <color name="catch_accent">#43A047</color>
+    <color name="catch_icon_background">#0D2B12</color>
+
+    <!-- Bubble state colours (spec 5) -->
+    <color name="state_running">#2E7D32</color>
+    <color name="state_loop">#00897B</color>
+    <color name="state_shizuku_down">#C62828</color>
+    <color name="state_roblox_dead">#EF6C00</color>
+    <color name="state_display_lost">#6A1B9A</color>
+    <color name="state_idle">#546E7A</color>
+
+    <color name="notification_color">#1B5E20</color>
+</resources>
