@@ -69,6 +69,9 @@ jobs:
           if ! printf '%s' "$clean" | base64 -d > "$RUNNER_TEMP/release.jks" 2>/tmp/decode.err; then
             echo "first 40 chars: $(printf '%s' "$clean" | head -c 40)"
             echo "length: ${#clean} characters"
+            if printf '%s' "$clean" | grep -qiE 'base64|keystore'; then
+              fail "KEYSTORE_BASE64 holds the command that produces the value, not the value itself. Set it to the output of: base64 -w0 keystore/catch-release.jks"
+            fi
             if printf '%s' "$clean" | grep -q '[^A-Za-z0-9+/=]'; then
               fail "KEYSTORE_BASE64 contains characters that are not base64. The raw keystore (binary) was probably pasted; set it with: gh secret set KEYSTORE_BASE64 --body \"\$(base64 -w0 keystore/catch-release.jks)\""
             fi
