@@ -1,0 +1,41 @@
+# --- Gradle / Android build output ---
+.gradle/
+build/
+**/build/
+local.properties
+
+# --- IDE / editor ---
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+.kotlin/
+
+# --- OS junk ---
+.DS_Store
+Thumbs.db
+
+# --- Native / capture artefacts ---
+.externalNativeBuild/
+.cxx/
+captures/
+*.hprof
+
+# --- Signing & release material (never commit) ---
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+*.pem
+*.p12
+*.keystore.properties
+
+# --- CI artefacts ---
+*.apk
+*.aab
+*.ap_
+output-metadata.json
