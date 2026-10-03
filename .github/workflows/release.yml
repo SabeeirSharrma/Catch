@@ -51,15 +51,49 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::Release signing secrets are missing."
-            echo "Add KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD as repository"
-            echo "secrets, then re-run this tag. Android cannot install an unsigned APK."
-            exit 1
+
+          fail() { echo "::error::$1"; exit 1; }
+
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [ -n "${!v:-}" ] || fail "Secret $v is missing. Add it under Settings > Secrets and variables > Actions."
+          done
+
+          # Tolerate wrapped, padded or URL-safe paste, then decode.
+          clean=$(printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | tr '_-' '/+')
+          case $(( ${#clean} % 4 )) in
+            2) clean="${clean}==" ;;
+            3) clean="${clean}=" ;;
+            1) fail "KEYSTORE_BASE64 has an impossible length (${#clean} chars): the value was truncated when it was pasted." ;;
+          esac
+
+          if ! printf '%s' "$clean" | base64 -d > "$RUNNER_TEMP/release.jks" 2>/tmp/decode.err; then
+            echo "first 40 chars: $(printf '%s' "$clean" | head -c 40)"
+            echo "length: ${#clean} characters"
+            if printf '%s' "$clean" | grep -q '[^A-Za-z0-9+/=]'; then
+              fail "KEYSTORE_BASE64 contains characters that are not base64. The raw keystore (binary) was probably pasted; set it with: gh secret set KEYSTORE_BASE64 --body \"\$(base64 -w0 keystore/catch-release.jks)\""
+            fi
+            fail "base64 -d failed: $(cat /tmp/decode.err)"
           fi
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+
+          # It must actually be a keystore (PKCS#12 starts 0x3082, JKS starts 0xFEDFFEED).
+          magic=$(head -c 4 "$RUNNER_TEMP/release.jks" | od -An -tx1 | tr -d ' \n')
+          size=$(wc -c < "$RUNNER_TEMP/release.jks")
+          case "$magic" in
+            3082*|fedffeed) : ;;
+            *) fail "Decoded value is not a keystore (first bytes: $magic, $size bytes). It is probably base64 of the wrong file." ;;
+          esac
+          if [ "$size" -lt 500 ]; then
+            fail "Decoded keystore is only $size bytes: KEYSTORE_BASE64 was truncated when pasted. Re-set it with: gh secret set KEYSTORE_BASE64 --body \"\$(base64 -w0 keystore/catch-release.jks)\""
+          fi
+
+          # Verifies the password and that the alias exists, before the slow build.
+          keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$KEYSTORE_PASSWORD" > /dev/null \
+            || fail "KEYSTORE_PASSWORD does not match the keystore."
+          keytool -list -keystore "$RUNNER_TEMP/release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null \
+            || fail "KEY_ALIAS '$KEY_ALIAS' is not in the keystore."
+
           echo "CATCH_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-          echo "Keystore decoded."
+          echo "Keystore decoded ($size bytes) and password/alias verified."
 
       - name: Build release APK
         run: ./gradlew :app:assembleRelease
