@@ -1,6 +1,16 @@
 name: Release
 
-# Push a tag like `v0.1.0` to build the release APK and publish a GitHub Release.
+# Push a tag like `v0.1.0` to build, sign and publish the release APK.
+#
+# Signing requires these repository secrets (Settings > Secrets and variables
+# > Actions):
+#   KEYSTORE_BASE64     base64 of the release keystore  (base64 -w0 catch-release.jks)
+#   KEYSTORE_PASSWORD   keystore password
+#   KEY_ALIAS           key alias
+#   KEY_PASSWORD        key password
+#
+# Android refuses to install an unsigned APK ("invalid package" / parse error),
+# so this workflow fails fast rather than publishing one.
 on:
   push:
     tags:
@@ -11,7 +21,7 @@ permissions:
 
 jobs:
   release:
-    name: Build and publish APK
+    name: Build, sign and publish APK
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,21 +43,23 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      # Signing is optional: without the secrets the workflow still publishes the
-      # (unsigned) APK, which is enough for sideloading after `apksigner sign`.
       - name: Prepare keystore
-        id: keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
-            echo "CATCH_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
-            echo "signed=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "signed=false" >> "$GITHUB_OUTPUT"
-            echo "No KEYSTORE_BASE64 secret configured; publishing an unsigned APK."
+          set -euo pipefail
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Release signing secrets are missing."
+            echo "Add KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD as repository"
+            echo "secrets, then re-run this tag. Android cannot install an unsigned APK."
+            exit 1
           fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "CATCH_KEYSTORE_FILE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "Keystore decoded."
 
       - name: Build release APK
         run: ./gradlew :app:assembleRelease
@@ -56,21 +68,34 @@ jobs:
           CATCH_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           CATCH_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Collect artifact
-        id: artifact
+      - name: Verify APK (signature, alignment, manifest)
         run: |
           set -euo pipefail
-          if [ "${{ steps.keystore.outputs.signed }}" = "true" ]; then
-            src=app/build/outputs/apk/release/app-release.apk
-          else
-            src=app/build/outputs/apk/release/app-release-unsigned.apk
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          APK=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$APK" ]; then
+            echo "::error::Release APK is unsigned (only app-release-unsigned.apk exists)."
+            exit 1
           fi
-          test -f "$src"
+          "$BT/apksigner" verify --verbose --print-certs "$APK"
+          "$BT/zipalign" -c -v 4 "$APK"
+          BADGING=$("$BT/aapt" dump badging "$APK")
+          echo "$BADGING" | head -n 1
+          echo "$BADGING" | grep -q "name='com.sabeeir.catchapp'"
+          if echo "$BADGING" | grep -qiE "testOnly|debuggable"; then
+            echo "::error::Release APK must not be testOnly/debuggable."
+            exit 1
+          fi
+          echo "$BADGING" | grep -q "sdkVersion:'30'"
+
+      - name: Collect artifact
+        run: |
+          set -euo pipefail
           name="Catch-${GITHUB_REF_NAME}.apk"
-          cp "$src" "$RUNNER_TEMP/$name"
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/$name"
           (cd "$RUNNER_TEMP" && sha256sum "$name" > SHA256SUMS.txt)
           echo "name=$name" >> "$GITHUB_OUTPUT"
-          echo "signed=${{ steps.keystore.outputs.signed }}" >> "$GITHUB_OUTPUT"
+        id: artifact
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -81,8 +106,9 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
-            Sideload this APK and grant Catch the Shizuku permission before starting a session.
+            Sideload this APK (it is signed with the Catch release key) and grant
+            Catch the Shizuku permission before starting a session.
 
             - Package: `com.sabeeir.catchapp`
-            - Signed: `${{ steps.artifact.outputs.signed }}`
+            - Signature: APK Signature Scheme v2, verified by `apksigner` in CI
             - SHA-256: see `SHA256SUMS.txt`

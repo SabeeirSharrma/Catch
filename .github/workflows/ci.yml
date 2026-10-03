@@ -45,6 +45,20 @@ jobs:
       - name: Debug APK
         run: ./gradlew :app:assembleDebug
 
+      - name: Verify APK signature
+        run: |
+          set -euo pipefail
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          "$BT/apksigner" verify --verbose app/build/outputs/apk/debug/app-debug.apk
+          "$BT/aapt" dump badging app/build/outputs/apk/debug/app-debug.apk | head -n 1
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4

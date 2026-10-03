@@ -26,6 +26,9 @@ captures/
 *.hprof
 
 # --- Signing & release material (never commit) ---
+# Note: keystore/ holds the Catch release key and its password. Back it up
+# somewhere safe outside the repo - without it no update can be signed.
+keystore/
 *.jks
 *.keystore
 keystore.properties
