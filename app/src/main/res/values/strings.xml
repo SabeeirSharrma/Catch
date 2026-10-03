@@ -36,6 +36,7 @@
     <string name="label_diagnostic">Diagnostics</string>
     <string name="btn_self_test">Run Shizuku self test</string>
     <string name="btn_keep_alive">Apply keep-alive tuning</string>
+    <string name="btn_share_error">Share last error report</string>
     <!-- OxygenOS checklist -->
     <string name="checklist_title">OxygenOS / manufacturer checklist</string>
     <string name="checklist_hint">Do these manually once, then lock both apps in recents.</string>

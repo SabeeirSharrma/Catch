@@ -15,6 +15,7 @@ import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.sabeeir.catchapp.CatchApplication
+import com.sabeeir.catchapp.CrashLog
 import com.sabeeir.catchapp.core.AntiIdleConfig
 import com.sabeeir.catchapp.core.AntiIdleEngine
 import com.sabeeir.catchapp.core.ClickPoint
@@ -108,20 +109,60 @@ class CatchService : LifecycleService() {
         //    stay claimed for every later command.
         val projectionClaimed = projection != null ||
             (intent?.action == CatchActions.ACTION_START && intent.hasProjectionConsent())
-        startForegroundCompat(withProjection = projectionClaimed)
 
-        when (intent?.action) {
-            CatchActions.ACTION_START -> startSession(intent)
-            CatchActions.ACTION_SHOW -> setMirrorMode(MirrorMode.SHOWN)
-            CatchActions.ACTION_HIDE -> setMirrorMode(MirrorMode.HIDDEN)
-            CatchActions.ACTION_TOGGLE_LOOP -> toggleClicker()
-            CatchActions.ACTION_STOP_LOOP -> haltLoops(StopReason.USER)
-            CatchActions.ACTION_APPLY_TOOLS -> applyTools(intent)
-            CatchActions.ACTION_RELAUNCH -> relaunchRoblox()
-            CatchActions.ACTION_STOP_ALL -> lifecycleScope.launch { stopAll(StopReason.USER) }
-            else -> if (!sessionActive) stopSelf()
+        // One guard around the whole command. An exception that escapes a Service is an
+        // uncaught exception, and that kills the process - taking the hidden display, the
+        // bubble and the notification with it - while leaving nothing behind but Android's
+        // "Catch keeps stopping" dialog. Everything is contained, reported and cleaned up.
+        try {
+            startForegroundCompat(withProjection = projectionClaimed)
+
+            when (intent?.action) {
+                CatchActions.ACTION_START -> startSession(intent)
+                CatchActions.ACTION_SHOW -> setMirrorMode(MirrorMode.SHOWN)
+                CatchActions.ACTION_HIDE -> setMirrorMode(MirrorMode.HIDDEN)
+                CatchActions.ACTION_TOGGLE_LOOP -> toggleClicker()
+                CatchActions.ACTION_STOP_LOOP -> haltLoops(StopReason.USER)
+                CatchActions.ACTION_APPLY_TOOLS -> applyTools(intent)
+                CatchActions.ACTION_RELAUNCH -> relaunchRoblox()
+                CatchActions.ACTION_STOP_ALL -> lifecycleScope.launch { stopAll(StopReason.USER) }
+                else -> if (!sessionActive) stopSelf()
+            }
+        } catch (t: Throwable) {
+            containCommandFailure(intent?.action, t)
         }
+
+        // START_NOT_STICKY: a session is built from a user gesture, never replayed for us.
         return START_NOT_STICKY
+    }
+
+    /**
+     * An action threw. Persist the stack (release builds are not debuggable), surface the
+     * reason, and tear down anything half-built instead of leaving it running.
+     */
+    private fun containCommandFailure(action: String?, t: Throwable) {
+        Log.e(TAG, "command ${action ?: "<null>"} failed", t)
+        CrashLog.record(applicationContext, t)
+        app.store.setDiagnostics("Failed in ${action ?: "<null>"}:\n${t.javaClass.name}: ${t.message}")
+
+        if (!foregroundStarted) {
+            // startForegroundService() was already called by the caller: without a matching
+            // startForeground() the system kills the service anyway, seconds later, with a
+            // RemoteServiceException. Try once more with the projection flag as it stands.
+            runCatching { startForegroundCompat(withProjection = projection != null) }
+                .onFailure { Log.w(TAG, "startForeground retry failed", it) }
+        }
+
+        // A failed START must not leave a partial session behind. A later command only has to
+        // report: the session it failed in is still the user's session.
+        if (action == CatchActions.ACTION_START || !sessionActive) {
+            val message = "Catch hit an error and stopped (${t.javaClass.simpleName})"
+            pendingStatusDetail = message
+            app.store.setStatusDetail(message)
+            lifecycleScope.launch { stopAll(StopReason.USER) }
+        } else {
+            app.store.setStatusDetail("Command failed: ${t.javaClass.simpleName}: ${t.message}")
+        }
     }
 
     override fun onDestroy() {
@@ -230,16 +271,31 @@ class CatchService : LifecycleService() {
     private fun attachOverlay() {
         overlay?.close()
         overlay = null
-        val created = BubbleOverlay(this, app.settings, overlayListener)
+
+        // Constructing the bubble touches the window manager (bounds, insets, addView), which
+        // a Service context may refuse. Contain it: the session itself is already live.
+        val created = try {
+            BubbleOverlay(this, app.settings, overlayListener)
+        } catch (t: Throwable) {
+            Log.e(TAG, "overlay could not be constructed", t)
+            CrashLog.record(applicationContext, t)
+            app.store.setStatusDetail(
+                "The bubble could not be created (${t.javaClass.simpleName}); " +
+                    "the session keeps running. Use the notification to control it.",
+            )
+            return
+        }
+
         if (created.show()) {
             overlay = created
             app.store.setMirrorMode(MirrorMode.HIDDEN)
         } else {
             // The notification keeps Show/Hide/Stop reachable, so the session can
             // carry on - but the user must know why the bubble is missing.
-            Log.w(TAG, "overlay window could not be attached")
+            Log.w(TAG, "overlay window could not be attached", created.lastFailure)
             app.store.setStatusDetail(
-                "Overlay permission is missing: the bubble cannot be shown. " +
+                "Overlay permission is missing: the bubble cannot be shown " +
+                    "(${created.lastFailure?.javaClass?.simpleName ?: "window refused"}). " +
                     "Use the notification to control the session.",
             )
         }

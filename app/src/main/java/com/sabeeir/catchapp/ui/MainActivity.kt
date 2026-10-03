@@ -8,6 +8,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -15,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.sabeeir.catchapp.CatchApplication
+import com.sabeeir.catchapp.CrashLog
 import com.sabeeir.catchapp.core.BubbleStateReducer
 import com.sabeeir.catchapp.core.ClickPoint
 import com.sabeeir.catchapp.core.LoopStatus
@@ -27,6 +30,8 @@ import com.sabeeir.catchapp.shell.KeepAliveTuner
 import com.sabeeir.catchapp.shell.SelfTestReport
 import com.sabeeir.catchapp.shell.ShizukuSession
 import kotlinx.coroutines.launch
+
+private const val TAG = "MainActivity"
 
 class MainActivity : AppCompatActivity() {
 
@@ -67,6 +72,9 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshPermissionRows()
+        // Only offered when there is actually a report to hand over.
+        binding.shareErrorButton.visibility =
+            if (CrashLog.read(this) != null) View.VISIBLE else View.GONE
     }
 
     override fun onDestroy() {
@@ -143,6 +151,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.selfTestButton.setOnClickListener { runSelfTest() }
         binding.keepAliveButton.setOnClickListener { runKeepAlive() }
+        binding.shareErrorButton.setOnClickListener { shareErrorReport() }
 
         // Restore persisted values.
         binding.cpsSlider.value = app.settings.cps
@@ -267,7 +276,15 @@ class MainActivity : AppCompatActivity() {
             .putExtra(CatchActions.EXTRA_WIDTH, DisplayConfig.DEFAULT_WIDTH)
             .putExtra(CatchActions.EXTRA_HEIGHT, DisplayConfig.DEFAULT_HEIGHT)
             .putExtra(CatchActions.EXTRA_DPI, DisplayConfig.DEFAULT_DPI)
-        ContextCompat.startForegroundService(this, intent)
+        try {
+            ContextCompat.startForegroundService(this, intent)
+        } catch (t: Throwable) {
+            // e.g. ForegroundServiceStartNotAllowedException on a restricted background start.
+            Log.e(TAG, "could not start the service", t)
+            CrashLog.record(this, t)
+            app.store.setStatusDetail("Could not start the service: ${t.javaClass.simpleName}")
+            return
+        }
         sendTools()
         app.store.setStatusDetail("Starting…")
     }
@@ -313,6 +330,31 @@ class MainActivity : AppCompatActivity() {
             val tuner = KeepAliveTuner { command -> app.shizuku.exec(command) }
             val results = tuner.apply()
             binding.diagnosticOutput.text = results.joinToString("\n")
+        }
+    }
+
+    /**
+     * Hands the recorded stack trace to the user. Release builds are not debuggable, so a
+     * share sheet is the only way a report can leave the device.
+     */
+    private fun shareErrorReport() {
+        val report = CrashLog.read(this)
+        if (report == null) {
+            app.store.setStatusDetail("No error report recorded yet")
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_SUBJECT, "Catch error report")
+            putExtra(Intent.EXTRA_TEXT, report)
+        }
+        runCatching {
+            startActivity(
+                Intent.createChooser(send, getString(com.sabeeir.catchapp.R.string.btn_share_error)),
+            )
+        }.onFailure {
+            Log.w(TAG, "no share target", it)
+            app.store.setStatusDetail("No app available to share the report")
         }
     }
 }

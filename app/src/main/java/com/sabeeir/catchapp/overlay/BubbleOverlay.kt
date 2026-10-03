@@ -71,9 +71,24 @@ class BubbleOverlay(
     private val bubbleSizePx = dp(BUBBLE_DP)
     private val edgeMarginPx = dp(4f)
 
-    private val screenBounds = windowManager.currentWindowMetrics.bounds
-    private val topInset = windowManager.currentWindowMetrics.windowInsets
-        .getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars()).top
+    // A Service is not a UiContext: getCurrentWindowMetrics() is documented to throw
+    // UnsupportedOperationException there, and the WindowInsets it returns are not guaranteed
+    // to exist. These run in eager property initialisers, so an unguarded refusal would kill
+    // the whole foreground service. ScreenMetrics gives every value a fallback instead.
+    private val screenBounds = ScreenMetrics.bounds(
+        measured = runCatching {
+            windowManager.currentWindowMetrics.bounds
+                .let { ScreenMetrics.Bounds(it.width(), it.height()) }
+        }.getOrNull(),
+        fallbackWidth = context.resources.displayMetrics.widthPixels,
+        fallbackHeight = context.resources.displayMetrics.heightPixels,
+    )
+    private val topInset = ScreenMetrics.topInset(
+        runCatching {
+            windowManager.currentWindowMetrics.windowInsets
+                .getInsetsIgnoringVisibility(android.view.WindowInsets.Type.systemBars()).top
+        }.getOrNull(),
+    )
 
     private val root = FrameLayout(context)
 
@@ -130,12 +145,16 @@ class BubbleOverlay(
         gravity = Gravity.TOP or Gravity.START
         layoutInDisplayCutoutMode =
             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-        x = screenBounds.width() - bubbleSizePx - edgeMarginPx
+        x = screenBounds.width - bubbleSizePx - edgeMarginPx
         y = topInset + edgeMarginPx
     }
 
     private var expanded = false
     private var attached = false
+
+    /** Why [show] was refused, so the caller can report it instead of guessing. */
+    var lastFailure: Throwable? = null
+        private set
 
     /** Movement below this is a tap, above it is a drag. */
     private var downRawX = 0f
@@ -178,9 +197,11 @@ class BubbleOverlay(
         return runCatching {
             windowManager.addView(root, windowParams)
             attached = true
+            lastFailure = null
         }.onFailure {
-            // Almost always a revoked SYSTEM_ALERT_WINDOW permission.
+            // Almost always a revoked SYSTEM_ALERT_WINDOW permission; report it verbatim.
             attached = false
+            lastFailure = it
         }.isSuccess
     }
 
@@ -196,7 +217,7 @@ class BubbleOverlay(
         expanded = value
         if (value) {
             val (dw, dh) = listener.displaySize()
-            val panelWidth = (screenBounds.width() * 85 / 100).coerceAtMost(screenBounds.width() - dp(16f))
+            val panelWidth = (screenBounds.width * 85 / 100).coerceAtMost(screenBounds.width - dp(16f))
             val surfaceHeight = if (dh > 0) (panelWidth.toFloat() / (dw.toFloat() / dh)).toInt() else panelWidth * 9 / 16
             bubbleView.visibility = View.GONE
             panel.visibility = View.VISIBLE
@@ -278,8 +299,8 @@ class BubbleOverlay(
             rawY = windowParams.y.toFloat(),
             bubbleW = bubbleSizePx,
             bubbleH = bubbleSizePx,
-            boundsW = screenBounds.width(),
-            boundsH = screenBounds.height(),
+            boundsW = screenBounds.width,
+            boundsH = screenBounds.height,
             insets = EdgeSnapper.Insets(top = topInset),
         )
         windowParams.x = x.toInt()
@@ -343,8 +364,8 @@ class BubbleOverlay(
         val x = settings.bubbleX
         val y = settings.bubbleY
         if (x >= 0 && y >= 0) {
-            windowParams.x = x.coerceAtMost(screenBounds.width() - bubbleSizePx)
-            windowParams.y = y.coerceIn(topInset, screenBounds.height() - bubbleSizePx)
+            windowParams.x = x.coerceAtMost(screenBounds.width - bubbleSizePx)
+            windowParams.y = y.coerceIn(topInset, screenBounds.height - bubbleSizePx)
         }
     }
 

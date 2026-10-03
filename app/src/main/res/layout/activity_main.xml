@@ -341,6 +341,13 @@
                     android:layout_height="wrap_content"
                     android:text="@string/btn_keep_alive" />
 
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/shareErrorButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/btn_share_error"
+                    android:visibility="gone" />
+
                 <TextView
                     android:id="@+id/diagnosticOutput"
                     android:layout_width="match_parent"

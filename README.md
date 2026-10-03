@@ -90,11 +90,16 @@ Two workflows live in `.github/workflows/`:
 
 Verified locally and in CI:
 
-- 92 JVM unit tests covering clicker rate/limits/pause, anti-idle, stop ordering, coordinate
+- 104 JVM unit tests covering clicker rate/limits/pause, anti-idle, stop ordering, coordinate
   mapping, edge snapping, injector guard (including real-screen refusal), exec framing, keep-alive
-  command text, watchdog transitions, surface routing and config validation.
+  command text, watchdog transitions, surface routing, config validation, overlay window-metric
+  fallbacks and error-report rendering.
 - `lintDebug` clean of errors; `assembleDebug` and R8 `assembleRelease` both build, and the
   mapping file confirms the Shizuku user-service class survives shrinking unrenamed.
+- No path fails silently: the bubble's window metrics fall back to the display metrics when the
+  window manager refuses a non-UI context (a Service), every service command is guarded, and the
+  last failure is written to disk and offered from Diagnostics as **Share last error report** —
+  the only way a stack can leave a non-debuggable release build.
 
 **Still unverified (needs a device, M0 §12a):** that the display is accepted with
 `FLAG_PUBLIC`, that `InputManager.injectInputEvent` works through the Shizuku user service on the
@@ -105,11 +110,12 @@ target Android build, and Roblox's behaviour on a secondary display (focus, rend
 ```
 app/src/main/aidl/      IShellService.aidl — user-service interface
 app/src/main/java/com/sabeeir/catchapp/
+  CrashLog.kt            last error report (survives a non-debuggable release build)
   core/                 pure logic: clicker, anti-idle, mapping, guard, stop, routing
   shell/                Shizuku session, user service, input engine, keep-alive, self-test
   display/              virtual display + ImageReader mirror sink
   service/              foreground service, notification, watchdog, broadcast actions
-  overlay/              bubble + mirror overlay window
+  overlay/              bubble + mirror overlay window, window-metric fallbacks
   ui/                   setup screen (permissions, checklist, session controls)
 app/src/test/           unit tests
 ```
