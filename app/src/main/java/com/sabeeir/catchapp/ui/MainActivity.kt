@@ -240,9 +240,8 @@ class MainActivity : AppCompatActivity() {
         binding.shizukuButton.isEnabled = !shizukuGranted()
         binding.overlayButton.isEnabled = !overlayGranted()
         binding.notificationsButton.isEnabled = !notificationsGranted()
-        if (!allGranted()) {
-            app.store.setStatusDetail("Grant every permission below, then start the session")
-        }
+        // Deliberately does not touch statusDetail: this runs on every Shizuku state
+        // change and would overwrite the real reason a session failed to start.
     }
 
     private fun status(granted: Boolean): String =

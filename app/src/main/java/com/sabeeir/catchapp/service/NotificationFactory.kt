@@ -70,7 +70,7 @@ class NotificationFactory(private val context: Context) {
         }
 
         if (state.robloxAlive.not() && state.displayAlive) {
-            builder.addAction(0, "Relaunch Roblox", actionIntent(CatchActions.ACTION_RELAUNCH, 4))
+            builder.addAction(0, context.getString(R.string.action_relaunch), actionIntent(CatchActions.ACTION_RELAUNCH, 4))
         }
 
         builder.addAction(0, context.getString(R.string.action_stop_all), actionIntent(CatchActions.ACTION_STOP_ALL, 5))

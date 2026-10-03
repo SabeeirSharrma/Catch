@@ -8,6 +8,7 @@
     <string name="action_show">Show mirror</string>
     <string name="action_hide">Hide</string>
     <string name="action_stop_loop">Stop loop</string>
+    <string name="action_relaunch">Relaunch Roblox</string>
     <string name="action_stop_all">Stop all</string>
     <!-- Setup -->
     <string name="setup_title">Setup</string>
