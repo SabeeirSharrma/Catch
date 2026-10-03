@@ -72,6 +72,9 @@ class CatchService : LifecycleService() {
     private var foregroundStarted = false
     private var stopping = false
 
+    /** A start failure the user must still see after teardown has run. */
+    private var pendingStatusDetail: String? = null
+
     // ------------------------------------------------------------------ life cycle
 
     override fun onCreate() {
@@ -94,7 +97,18 @@ class CatchService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
-        startForegroundCompat()
+
+        // Exactly one startForeground() per command, and the mediaProjection type is
+        // only ever claimed while the user's consent is in hand. Two rules from the
+        // platform force this shape:
+        //  - Android 14+ throws SecurityException when startForeground() claims the
+        //    mediaProjection type before the consent dialog was granted;
+        //  - MediaProjectionManagerService stops an active projection as soon as no
+        //    running FGS carries that type, so once a session is alive the type must
+        //    stay claimed for every later command.
+        val projectionClaimed = projection != null ||
+            (intent?.action == CatchActions.ACTION_START && intent.hasProjectionConsent())
+        startForegroundCompat(withProjection = projectionClaimed)
 
         when (intent?.action) {
             CatchActions.ACTION_START -> startSession(intent)
@@ -146,11 +160,11 @@ class CatchService : LifecycleService() {
         }
 
         displayConfig = DisplayConfig.sanitized(width, height, dpi)
+        pendingStatusDetail = null
 
-        // Android 14+: a mediaProjection typed FGS must be running *before*
-        // getMediaProjection().
-        startForegroundCompat(withProjection = true)
-
+        // Android 14+: the mediaProjection typed FGS (started in onStartCommand,
+        // before this method) must already be running when getMediaProjection() is
+        // called, and before createVirtualDisplay().
         val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projection = runCatching { manager.getMediaProjection(resultCode, consent) }
             .onFailure { Log.w(TAG, "getMediaProjection failed: $it") }
@@ -200,10 +214,12 @@ class CatchService : LifecycleService() {
 
         lifecycleScope.launch {
             val result = app.shizuku.exec(Commands.launchRoblox(displayId))
-            if (!result.isSuccess) {
+            if (result.isSuccess) {
+                app.store.updateSignals(robloxAlive = true)
+            } else {
+                app.store.updateSignals(robloxAlive = false)
                 app.store.setStatusDetail("Launch failed: ${result.summary()}")
             }
-            app.store.updateSignals(robloxAlive = true)
             publishNotification()
         }
 
@@ -213,15 +229,34 @@ class CatchService : LifecycleService() {
 
     private fun attachOverlay() {
         overlay?.close()
-        overlay = BubbleOverlay(this, app.settings, overlayListener).also { it.show() }
-        app.store.setMirrorMode(MirrorMode.HIDDEN)
+        overlay = null
+        val created = BubbleOverlay(this, app.settings, overlayListener)
+        if (created.show()) {
+            overlay = created
+            app.store.setMirrorMode(MirrorMode.HIDDEN)
+        } else {
+            // The notification keeps Show/Hide/Stop reachable, so the session can
+            // carry on - but the user must know why the bubble is missing.
+            Log.w(TAG, "overlay window could not be attached")
+            app.store.setStatusDetail(
+                "Overlay permission is missing: the bubble cannot be shown. " +
+                    "Use the notification to control the session.",
+            )
+        }
     }
 
     private fun failAndStop(message: String) {
         Log.w(TAG, "start failed: $message")
+        pendingStatusDetail = message
         app.store.setStatusDetail(message)
         lifecycleScope.launch { stopAll(StopReason.USER) }
     }
+
+    /** True when this START intent carries a consent the user already granted. */
+    @Suppress("DEPRECATION")
+    private fun Intent.hasProjectionConsent(): Boolean =
+        getIntExtra(CatchActions.EXTRA_RESULT_CODE, Int.MIN_VALUE) != Int.MIN_VALUE &&
+            getParcelableExtra<Intent>(CatchActions.EXTRA_RESULT_DATA) != null
 
     // ------------------------------------------------------------------ mirror
 
@@ -252,25 +287,35 @@ class CatchService : LifecycleService() {
             app.store.setCalibration(point)
         }
 
-        val wasRunning = clicker?.status == LoopStatus.RUNNING
-        val config = ClickerConfig(
+        // Reuse an engine whose settings did not change: rebuilding one resets its
+        // counters, which would quietly disarm the click/time limits on every tick
+        // of the sliders.
+        val clickerConfig = ClickerConfig(
             cps = app.settings.cps,
             maxClicks = app.settings.maxClicks,
             maxMinutes = app.settings.maxMinutes,
             points = listOfNotNull(point),
             activePointId = point?.id,
         )
-        clicker = ClickerEngine(config)
-        if (wasRunning) clicker?.start(SystemClock.uptimeMillis())
+        val existingClicker = clicker
+        if (existingClicker == null || existingClicker.config != clickerConfig) {
+            val wasRunning = existingClicker?.status == LoopStatus.RUNNING
+            clicker = ClickerEngine(clickerConfig)
+            if (wasRunning) clicker?.start(SystemClock.uptimeMillis())
+        }
 
-        val antiIdleWasRunning = antiIdle?.status == LoopStatus.RUNNING
-        antiIdle = AntiIdleEngine(
-            AntiIdleConfig(
-                enabled = true,
-                intervalMinutes = app.settings.antiIdleMinutes,
-            ),
-        ) { app.store.calibration.value ?: app.settings.calibrationPoint }
-        if (antiIdleWasRunning) antiIdle?.start(SystemClock.uptimeMillis())
+        val antiIdleConfig = AntiIdleConfig(
+            enabled = true,
+            intervalMinutes = app.settings.antiIdleMinutes,
+        )
+        val existingAntiIdle = antiIdle
+        if (existingAntiIdle == null || existingAntiIdle.config != antiIdleConfig) {
+            val antiIdleWasRunning = existingAntiIdle?.status == LoopStatus.RUNNING
+            antiIdle = AntiIdleEngine(antiIdleConfig) {
+                app.store.calibration.value ?: app.settings.calibrationPoint
+            }
+            if (antiIdleWasRunning) antiIdle?.start(SystemClock.uptimeMillis())
+        }
 
         syncLoopStatuses()
     }
@@ -513,7 +558,8 @@ class CatchService : LifecycleService() {
                     sessionActive = false
                     stopping = false
                     app.store.setServiceRunning(false)
-                    app.store.setStatusDetail("Stopped")
+                    app.store.setStatusDetail(pendingStatusDetail ?: "Stopped")
+                    pendingStatusDetail = null
                     notifications.cancel()
                     ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                     stopSelf()
@@ -607,7 +653,7 @@ class CatchService : LifecycleService() {
 
     // ------------------------------------------------------------------ notification
 
-    private fun startForegroundCompat(withProjection: Boolean = foregroundStarted) {
+    private fun startForegroundCompat(withProjection: Boolean = projection != null) {
         val state = currentState()
         val notification = notifications.build(state)
         if (Build.VERSION.SDK_INT >= 34) {

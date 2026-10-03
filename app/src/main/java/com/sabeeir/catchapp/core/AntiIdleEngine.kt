@@ -4,7 +4,7 @@ package com.sabeeir.catchapp.core
  * Anti-idle core (spec 9.2): a single tap every N minutes, always well under Roblox's
  * ~20 minute kick. Independent from the auto-clicker so it can run on its own.
  */
-class AntiIdleEngine(private val config: AntiIdleConfig, private val pointProvider: () -> ClickPoint?) {
+class AntiIdleEngine(val config: AntiIdleConfig, private val pointProvider: () -> ClickPoint?) {
 
     var status: LoopStatus = LoopStatus.OFF
         private set

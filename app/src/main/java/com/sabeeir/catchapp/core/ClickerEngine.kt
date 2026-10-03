@@ -11,7 +11,7 @@ package com.sabeeir.catchapp.core
  *  - while paused (finger on the mirror) nothing is emitted and no backlog builds up;
  *  - once stopped (Stop, Shizuku death, display loss) it never restarts by itself.
  */
-class ClickerEngine(private val config: ClickerConfig) {
+class ClickerEngine(val config: ClickerConfig) {
 
     var status: LoopStatus = LoopStatus.OFF
         private set

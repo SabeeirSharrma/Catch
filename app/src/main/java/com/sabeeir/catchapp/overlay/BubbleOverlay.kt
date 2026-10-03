@@ -172,12 +172,16 @@ class BubbleOverlay(
 
     // ------------------------------------------------------------------ window
 
-    fun show() {
-        if (attached) return
-        runCatching {
+    /** @return true when the overlay window is attached to the screen. */
+    fun show(): Boolean {
+        if (attached) return true
+        return runCatching {
             windowManager.addView(root, windowParams)
             attached = true
-        }
+        }.onFailure {
+            // Almost always a revoked SYSTEM_ALERT_WINDOW permission.
+            attached = false
+        }.isSuccess
     }
 
     fun close() {
